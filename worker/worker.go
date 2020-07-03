@@ -1,34 +1,66 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"net"
-	"google.golang.org/grpc"
-	"github.com/tutorialedge/go-grpc-tutorial/chat"
-
+	"net/rpc"
+	"os"
+	"log"
+	"strings"
 )
 
-const (
-	port = ":9000"
-)
+// server RPC
+type MWorker int
+// worker RPC
+type WWorker int
+
+
+var serverAddress string
+var workerPort string
+
+type RegisterWorkerRes struct {}
+type RegisterWorkerReq struct {
+	IP string
+}
+
+
+func getAddress (address string) (string) {
+	return	strings.Split(address, ":")[0]
+}
 
 
 func main() {
-	lis, err := net.Listen("tcp",":9000")
-	if err != nil {
-		log.Fatalf("Failed to listen on port %v: %v " , port, err)
+	args := os.Args[1:]
+
+	if len(args) != 2 {
+		fmt.Println("Usage: go run worker.go [server ip:port] [worker port]")
+		return
 	}
 
-	// generate in chat.pb.proto
-	s := chat.Server{}
+	serverAddr := args[0]
+	// workerPort := args[1]
 
-	grpcServer := grpc.NewServer()
+	go func() {
+		workerServer := rpc.NewServer()
+		workerServer.Register(new(MWorker))
 
-	// register gRPC server , chat server struct
-	chat.RegisterChatServiceServer(grpcServer, &s)
+		listener, err := net.Listen("tcp", ":" + workerPort)
+		if err != nil {
+			log.Fatal("tcp server listener error ", err)
+		}
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				log.Fatal("tcp server accept error ", err)
+			}
+			log.Println("Connected to server", serverAddr)
+			go workerServer.ServeConn(conn)
+		}
+	}()
 
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve gRPC server over port %v: %v", port, err)
-	}
+	select{}
+}
 
+func handleClientConnection(conn net.Conn, serverAddr string) {
+	rpc.ServeConn(conn)
 }
