@@ -10,7 +10,10 @@ import (
 	"sync"
 	"strconv"
 	"time"
+<<<<<<< HEAD
 	
+=======
+>>>>>>> 60fed5dee2a496342a4ec778900b33bc74ee8233
 )
 
 
@@ -127,6 +130,8 @@ func (t *MWorker) RegisterWorker(req *RegisterWorkerReq, res *RegisterWorkerRes)
 	defer mu.Unlock()
 	workers = append(workers, req.WorkerIP)
 	log.Println("Registered to Worker Pool:", req.WorkerIP)
+<<<<<<< HEAD
+=======
 	return nil
 }
 //*************************************************************
@@ -150,6 +155,111 @@ type CrawlRes struct {
 	WorkerIP string // workerIP
 }
 
+// measuring latency between a website and a worker
+type MeasureLatencyRes struct {
+	Min time.Duration
+	Median time.Duration
+	Max time.Duration
+}
+type MeasureLatencyReq struct {
+	URL string
+	Samples int
+}
+func getDomainName(uri string) string {
+	u, _ := url.Parse(uri)
+	return u.Host
+}
+func hasMappedDomain(uri string) string {
+	for ip, domains := range assignedDomains {
+		for _,d := range domains {
+			if getDomainName(uri) == d {
+				return ip
+			}
+		}
+	}
+	return ""
+}
+func selectBestLatency(stats map[string]MeasureLatencyRes) (currIP string) {
+	minLatency,_ := time.ParseDuration("24h")
+	currIP = ""
+	for ip, latency := range stats {
+		if latency.Min < minLatency {
+			minLatency = latency.Min
+			currIP = ip
+		}
+	}
+	return
+}
+func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
+	log.Println("Start crawling", req.URL)
+	latReq := MeasureLatencyReq{
+		URL: req.URL,
+		Samples: samples,
+	}
+	latRes := MeasureLatencyRes{}
+	stats := make(map[string]MeasureLatencyRes)
+
+	worker := hasMappedDomain(req.URL)
+	if worker == "" {
+		var wg sync.WaitGroup
+		wg.Add(len(workers))
+		for _, worker := range workers {
+			go func() {
+				conn, err := net.Dial("tcp", worker)
+				defer conn.Close()
+				if err != nil {
+					log.Fatal("Crawl: tcp dial error", err)
+				}
+				client := rpc.NewClient(conn)
+				err = client.Call("MWorker.MeasureLatency", &latReq, &latRes)
+				// handle error
+				// log.Println(latReq.URL, latRes.Min, latRes.Median, latRes.Max)
+				mu.Lock()
+				stats[worker] = latRes
+				mu.Unlock()
+			}()
+		}
+		wg.Wait()
+		log.Println("Mapped")
+		worker := selectBestLatency(stats)
+	} else {
+		// add to domain
+		assignedDomains[worker] = append(assignedDomains[worker], req.URL)
+	}
+	log.Println("Assigend", worker, "to", req.URL)
+	
+	conn, _ := net.Dial("tcp", worker)
+	client := rpc.NewClient(conn)
+	_ = client.Call("MWorker.CrawlWebsite", &latReq, &latRes)
+	conn.Close()
+
+
+
+>>>>>>> 60fed5dee2a496342a4ec778900b33bc74ee8233
+	return nil
+}
+//*************************************************************
+type DomainsReq struct {
+	WorkerIP string // IP of worker
+}
+type DomainsRes struct {
+	Domains []string // List of domain string
+}
+func (m *MServer) Domains(req *DomainsReq, res *DomainsRes) error {
+	res.Domains = assignedDomains[req.WorkerIP]
+	return nil
+}
+//*************************************************************
+type CrawlReq struct {
+	URL   string // URL of the website to crawl
+	Depth int    // Depth to crawl to from URL
+}
+// Response to MServer.Crawl
+type CrawlRes struct {
+	WorkerIP string // workerIP
+}
+
+<<<<<<< HEAD
 // measuring latency between a website and a worker
 type MeasureLatencyRes struct {
 	Min time.Duration
@@ -238,4 +348,6 @@ func sendCrawlTask(worker string, ) {
 }
 
 
+=======
+>>>>>>> 60fed5dee2a496342a4ec778900b33bc74ee8233
 //*************************************************************

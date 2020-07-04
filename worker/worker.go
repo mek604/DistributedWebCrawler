@@ -11,7 +11,10 @@ import (
 	"strings"
 	"time"
 	"sort"
+<<<<<<< HEAD
 	"golang.org/x/net/html"
+=======
+>>>>>>> 60fed5dee2a496342a4ec778900b33bc74ee8233
 )
 
 // server RPC
@@ -21,10 +24,14 @@ type MWorker int
 
 
 const workerPort string = "3800"
+<<<<<<< HEAD
 var (
 	serverAddress string
 	urls []string
 )
+=======
+var serverAddress string
+>>>>>>> 60fed5dee2a496342a4ec778900b33bc74ee8233
 
 type RegisterWorkerReq struct {
 	WorkerIP string
@@ -147,6 +154,7 @@ func (t *MWorker) MeasureLatency(req *MeasureLatencyReq, res *MeasureLatencyRes)
 }
 
 //*************************************************************
+<<<<<<< HEAD
 type CrawlWebsiteReq struct {
 	URL string
 	Depth int
@@ -194,4 +202,15 @@ func crawl(uri string) (links []string) {
 	}
 	return
 }
+=======
+type CrawlReq struct {
+}
+type CrawlRes struct {
+}
+func (t *MWorker) CrawlWebsite(req *CrawlReq, res *CrawlRes) error {
+
+	return nil
+}
+
+>>>>>>> 60fed5dee2a496342a4ec778900b33bc74ee8233
 //*************************************************************
