@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"sort"
+	"golang.org/x/net/html"
 )
 
 // server RPC
@@ -20,7 +21,10 @@ type MWorker int
 
 
 const workerPort string = "3800"
-var serverAddress string
+var (
+	serverAddress string
+	urls []string
+)
 
 type RegisterWorkerReq struct {
 	WorkerIP string
@@ -143,13 +147,51 @@ func (t *MWorker) MeasureLatency(req *MeasureLatencyReq, res *MeasureLatencyRes)
 }
 
 //*************************************************************
-type CrawlReq struct {
+type CrawlWebsiteReq struct {
+	URL string
+	Depth int
 }
-type CrawlRes struct {
+type CrawlWebsiteRes struct {
+
 }
-func (t *MWorker) CrawlWebsite(req *CrawlReq, res *CrawlRes) error {
+func (t *MWorker) CrawlWebsite(req *CrawlWebsiteReq, res *CrawlWebsiteRes) error {
+	domain := getDomainName(CrawlWebsiteReq.URL)
+	fmtURL := getAbsolutePath(CrawlWebsiteRes.URL)
+	
+	
 
 	return nil
 }
+// crawl once (depth = 1)
+// need to check if the link starts with https or not
+// some may be relative url instead of absolute
+func crawl(uri string) (links []string) {
+	fmt.Println("Crawling", uri)
+	resp, _ := http.Get(uri)
+	defer resp.Body.Close()
+	z := html.NewTokenizer(resp.Body)
+	uniqueLinks := make(map[string]bool)
 
+	for {
+		tt := z.Next()
+		switch tt {
+			case html.ErrorToken:
+				return
+			case html.StartTagToken, html.EndTagToken:
+				token := z.Token()
+				if "a" == token.Data {
+					// add only unique links
+					for _, attr := range token.Attr {
+						if attr.Key == "href" && ! uniqueLinks[attr.Val] {
+							// check if the path is relative
+							// if not append
+							links = append(links, attr.Val)
+							uniqueLinks[attr.Val] = true
+						}
+					}
+				}
+		}
+	}
+	return
+}
 //*************************************************************

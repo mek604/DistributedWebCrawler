@@ -10,6 +10,7 @@ import (
 	"sync"
 	"strconv"
 	"time"
+	
 )
 
 
@@ -197,6 +198,7 @@ func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
 	if worker == "" {
 		var wg sync.WaitGroup
 		wg.Add(len(workers))
+		// request workers to measure latency to a website
 		for _, worker := range workers {
 			go func() {
 				conn, err := net.Dial("tcp", worker)
@@ -217,20 +219,23 @@ func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
 		log.Println("Mapped")
 		worker := selectBestLatency(stats)
 	} else {
-		// add to domain
 		assignedDomains[worker] = append(assignedDomains[worker], req.URL)
 	}
 	log.Println("Assigend", worker, "to", req.URL)
-	
-	conn, _ := net.Dial("tcp", worker)
-	client := rpc.NewClient(conn)
-	_ = client.Call("MWorker.CrawlWebsite", &latReq, &latRes)
-	conn.Close()
-
-
-
+	sendCrawlTask(worker)	
+		
 	return nil
 }
 //*************************************************************
+
+func sendCrawlTask(worker string, ) {
+	conn, _ := net.Dial("tcp", worker)
+	client := rpc.NewClient(conn)
+
+	// need request and response
+	_ = client.Call("MWorker.CrawlWebsite", &latReq, &latRes)
+	conn.Close()
+}
+
 
 //*************************************************************
