@@ -12,7 +12,7 @@ import (
 	"time"
 	"sort"
 	"golang.org/x/net/html"
-	// "sync"
+	"sync"
 )
 
 // server RPC
@@ -26,7 +26,7 @@ var (
 	serverAddress string
 	savedDomains map[string]struct{}
 	webGraph map[string][]string // maps url:[next urls]
-	// mu sync.Mutex
+	mu sync.Mutex
 )
 
 type RegisterWorkerReq struct {
@@ -101,8 +101,9 @@ func resolveReference(uri string) string {
 func filterAddress(link, domain string) string {
 	resolved := resolveReference(link)
 	if strings.HasPrefix(link, "/") {
-		return domain + resolved
-	} 
+		resolved = "http://" + domain + resolved
+		return resolved
+	}
 	return resolved
 }
 
@@ -167,7 +168,6 @@ type CrawlWebsiteReq struct {
 	Depth int
 }
 type CrawlWebsiteRes struct {
-	Depth int
 	Links []string
 }
 func contains(arr []string, val string) bool {
@@ -179,34 +179,40 @@ func contains(arr []string, val string) bool {
 	return false
 }
 func (t *MWorker) CrawlWebsite(req *CrawlWebsiteReq, res *CrawlWebsiteRes) error {
-	log.Printf("Start crawling %s (depth= %d)\n", req.URL, req.Depth)
+	mu.Lock()
+	defer mu.Unlock()
 	domain := getDomainName(req.URL)
 	// store domain name if hasn't already
 	if _, in := savedDomains[domain]; !in {
 		savedDomains[domain] = struct{}{}
 	}
+	fmtRequestURL := filterAddress(req.URL, domain)
+	// skip if already crawled
+	found := webGraph[fmtRequestURL]
 	if req.Depth == 0 {
+		log.Printf("Return to server: (%s) has depth == 0\n", fmtRequestURL)
 		return nil
 	}
-	// get absolute path
-	fmtRequestURL := filterAddress(req.URL, domain)
+	if found != nil {
+		log.Printf("Return to server: worker has already crawled (%s)\n", fmtRequestURL)
+		res.Links = webGraph[fmtRequestURL]
+		return nil
+	}
+	log.Printf("Start crawling (%s) depth= %d\n", fmtRequestURL, req.Depth)
 	links := getLinks(fmtRequestURL)
-	log.Println("Done Crawling.")
+	// log.Printf("Done crawling (%s)\n", fmtRequestURL)
 	// could try to distribute this work
 	for _, link := range links {
 		if !contains(webGraph[fmtRequestURL], link) {
 			webGraph[fmtRequestURL] = append(webGraph[fmtRequestURL], link)
 		}
 	}
-	// doing this means each depth will return to server
-	res.Depth--
-	res.Links = links
-	
+	// doing this means each crawl depth will have to send back a response to server
+	// TO DO: continue to crawl right away if the worker owns the extracted link
+	res.Links = links 
 	// for node, edges := range webGraph {
 	// 	log.Printf("\nNode:\t%s\nEdges:\t%s\n", node, edges)
 	// }
-
-
 	return nil
 }
 
@@ -216,7 +222,7 @@ func (t *MWorker) CrawlWebsite(req *CrawlWebsiteReq, res *CrawlWebsiteRes) error
 func getLinks(uri string) (links []string) {
 	resp, _ := http.Get(uri)
 	defer resp.Body.Close()
-	
+
 	domain := getDomainName(uri)
 	z := html.NewTokenizer(resp.Body)
 	uniqueLinks := make(map[string]bool)

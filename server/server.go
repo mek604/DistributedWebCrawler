@@ -119,7 +119,7 @@ func (t *MWorker) RegisterWorker(req *RegisterWorkerReq, res *RegisterWorkerRes)
 	mu.Lock()
 	defer mu.Unlock()
 	workers = append(workers, req.WorkerIP)
-	log.Println("Registered to Worker Pool:", req.WorkerIP)
+	log.Println("Register", req.WorkerIP, " to worker pool")
 	return nil
 }
 //*************************************************************
@@ -131,7 +131,7 @@ type DomainsRes struct {
 	Domains []string // List of domain string
 }
 func (m *MServer) Domains(req *DomainsReq, res *DomainsRes) error {
-	log.Println("Client RPC: request a map of a worker to domains")
+	log.Println("<- Client RPC: returning a map of a worker to domains")
 	res.Domains = assignedDomains[req.WorkerIP]
 	return nil
 }
@@ -162,6 +162,7 @@ func getDomainName(uri string) string {
 func findMappedDomain(uri string) string {
 	for ip, domains := range assignedDomains {
 		for _,d := range domains {
+			// log.Println("\t\t", uri, getDomainName(uri), d)
 			if getDomainName(uri) == d {
 				return ip
 			}
@@ -180,23 +181,23 @@ func selectBestLatency(stats map[string]MeasureLatencyRes) (currIP string) {
 	}
 	return
 }
-func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
-	log.Printf("Client RPC: start crawling {%s}\n", req.URL)
+// find a worker that owns the domain of a URL:
+// if owner not found, ask all workers to measure latency to the URL
+// and select the worker with lowest latency
+func findWorker(reqURL string) string {
 	latReq := MeasureLatencyReq{
-		URL: req.URL,
+		URL: reqURL,
 		Samples: samples,
 	}
 	latRes := MeasureLatencyRes{}
 	stats := make(map[string]MeasureLatencyRes)
-	worker := findMappedDomain(req.URL)
-
-	//////////////////// Select worker with lowest URL latency  //////////////////// 
+	worker := findMappedDomain(reqURL)
 	if worker == "" {
-		log.Printf("Owner-worker of {%s} domain not found\n", req.URL)
+		log.Printf("Owner-worker of (%s) domain not found\n", reqURL)
 		var wg sync.WaitGroup
 		wg.Add(len(workers))
 		// request workers to measure latency to a website
-		log.Printf("Start measuring latency of {%s}", req.URL)
+		log.Printf("\tMeasuring latency of (%s)", reqURL)
 		for _, worker := range workers {
 			go func() {
 				conn, err := net.Dial("tcp", worker)
@@ -205,7 +206,7 @@ func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
 					log.Fatal("Crawl: tcp dial error", err)
 				}
 				client := rpc.NewClient(conn)
-				err = client.Call("MWorker.MeasureLatency", &latReq, &latRes)
+				err = client.Call("MWorker.MeasureLatency", latReq, &latRes)
 				// handle error
 				// log.Println(latReq.URL, latRes.Min, latRes.Median, latRes.Max)
 				stats[worker] = latRes
@@ -214,17 +215,19 @@ func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
 		}
 		wg.Wait()
 		worker = selectBestLatency(stats)
-		assignedDomains[worker] = append(assignedDomains[worker], getDomainName(req.URL))
+		log.Printf("Assigned %s the domain of %s\n", worker, reqURL)
+		mu.Lock()
+		assignedDomains[worker] = append(assignedDomains[worker], getDomainName(reqURL))
+		mu.Unlock()
 	} 
-	////////////////////////////////////////////////////////////////////////////////
-
-	log.Printf("Assigned domains %s\n", assignedDomains)
+	return worker
+}
+func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
+	log.Printf("<- Clien RPC: Crawl (%s)\n", req.URL)
+	worker := findWorker(req.URL)
 	res.WorkerIP = worker
 
-	if req.Depth == 0 {
-		return nil
-	} else {
-		// Need to block the client until crawl to depth "d" is done
+	if req.Depth > 0 {
 		sendCrawlTask(worker, req.URL, req.Depth)	
 	}
 
@@ -240,19 +243,39 @@ type CrawlWebsiteRes struct {
 	Depth int
 	Links []string
 }
-
+// does not seem to loop back
+// maybe the crawl loop returns first?
 func sendCrawlTask(worker, uri string, depth int) {
+	log.Printf("-> Worker RPC: ask %s to crawl %s\n", worker, uri)
 	conn, _ := net.Dial("tcp", worker)
 	client := rpc.NewClient(conn)
+	defer conn.Close()
 
 	req := CrawlWebsiteReq{
 		URL: uri,
 		Depth: depth,
 	}
 	res := CrawlWebsiteRes{}
-	_ = client.Call("MWorker.CrawlWebsite", &req, &res)
-	conn.Close()
+	// need to make this better
+	_ = client.Call("MWorker.CrawlWebsite", req, &res)
+	depth--
+	var wg sync.WaitGroup
+	// subsequent crawls
+	if depth > 0 {
+		for _, link := range res.Links {
+			wg.Add(1)
+			go func(link string, d int) {
+				defer wg.Done()
+				if link == "" {
+					return
+				}
+				worker := findWorker(link)
+				log.Println(link, worker, depth)
+				sendCrawlTask(worker, link, d)
+			}(link, depth)
+		}
+		depth--
+		wg.Wait()
+	}
 }
-
-
 //*************************************************************
