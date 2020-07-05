@@ -5,19 +5,21 @@ import (
 	"net/url"
 	"net/http"
 	"golang.org/x/net/html"
+	"strings"
 )
 
 
 func main() {
 
-	urls := [...] string {
-		"http://1867.com/",
-		"http://www.facebook.com/",
-		"https://www.facebook.com/",
-		"http://www.cs.ubc.ca/~bestchai/teaching/../teaching/././../teaching/cs416_2016w2/assign5/index.html",
-		"http://www.cs.ubc.ca/~bestchai/teaching/cs416_2016w2/assign5/index.html",
-		"https://www.49thapparel.com/",
-	}
+	// urls := [...] string {
+	// 	"http://1867.com/",
+	// 	"http://www.facebook.com/",
+	// 	"https://www.facebook.com/",
+	// 	"http://www.cs.ubc.ca/~bestchai/teaching/../teaching/././../teaching/cs416_2016w2/assign5/index.html",
+	// 	"http://www.cs.ubc.ca/~bestchai/teaching/cs416_2016w2/assign5/index.html",
+	// 	"https://www.49thapparel.com/",
+
+	// }
 	// fmt.Println("*** Get Domain Name Test *** ")
 	// for _,u := range urls {
 	// 	fmt.Println(getDomainName(u))
@@ -26,7 +28,6 @@ func main() {
 	// fmt.Println("\n*** Remove Relative Path Test ***")
 	// for _,u := range urls {
 	// 	fmt.Println(getAbsolutePath(u))
-	// }
 
 	// mmap := make(map[string][]string) // maps each worker's ip:port to addresses
 	// wip := "127.0.0.1:3000"
@@ -39,14 +40,14 @@ func main() {
 	// }
 	// fmt.Println(mmap)
 
-
+	// fmt.Println("*** Get DomainName Test ***")
 	// for _,u := range urls {
-	// 	fmt.Println(getDomainName(u))
+	// 	fmt.Println(u, "\n\t", getDomainName(u))
 	// }
 
 	// fmt.Println("\n*** Remove Relative Path Test ***")
 	// for _,u := range urls {
-	// 	fmt.Println(getAbsolutePath(u))
+	// 	fmt.Println(resolveReference(u))
 	// }
 
 	// mmap := make(map[string][]string) // maps each worker's ip:port to addresses
@@ -59,7 +60,41 @@ func main() {
 	// 	mmap[wip] = append(mmap[wip], urls[1])
 	// }
 	// fmt.Println(mmap)
-	fmt.Println(crawl(urls[len(urls) - 1]))
+	
+	// fmt.Println(crawl(urls[len(urls) - 1]))
+
+	// fmt.Println("\n*** Formatting Address Test ***")
+	// domain := getDomainName(urls[len(urls)-1])
+	links := []string {
+		"/collections/new-arrivals",
+		"/collections/./../collections/././new-arrivals",
+		"https://www.49thapparel.com/collections/././shoes",
+		"https://www.49thapparel.com/collections/boots",
+		"https://www.49thapparel.com/collections/./../collections/././new-arrivals",
+	}
+	// for _,link := range links {
+	// 	fmt.Println(filterAddress(domain, link))
+	// }
+	domain := getDomainName(links[2])
+	webGraph := make(map[string][]string)
+	fmtRequestURL := "https://www.49thapparel.com/c/"
+	for _, link := range links {
+		if !contains(webGraph[fmtRequestURL], filterAddress(link, domain)) {
+			webGraph[fmtRequestURL] = append(webGraph[fmtRequestURL], filterAddress(link, domain))
+		}
+	}
+	for i,j := range webGraph {
+		fmt.Println(i, j)
+	}
+
+	for node, edges := range webGraph {
+		fmt.Printf("Node:\t%s\nEdges:", node)
+		for _, e := range edges {
+			fmt.Printf("\t%s\n", e)
+		}
+	}
+
+
 }
 
 func getDomainName(uri string) string {
@@ -67,9 +102,10 @@ func getDomainName(uri string) string {
 	return u.Host
 }
 
-func getAbsolutePath(uri string) string {
+
+func resolveReference(uri string) string {
 	u, _ := url.Parse(uri)
-	base, _ := url.Parse(getDomainName("http://example.com/directory/"))
+	base, _ := url.Parse(getDomainName(uri))
 	return base.ResolveReference(u).String()
 }
 
@@ -103,4 +139,22 @@ func crawl(uri string) (links []string) {
 		}
 	}
 	return
+}
+
+// append to domain a relative path
+// the input must be a domain (i.e, does not start with 'http')
+func filterAddress(link, domain string) string {
+	resolved := resolveReference(link)
+	if strings.HasPrefix(link, "/") {
+		return domain + resolved
+	} 
+	return resolved
+}
+func contains(arr []string, val string) bool {
+	for _, a := range arr {
+		if val == a {
+			return true
+		}
+	}
+	return false
 }

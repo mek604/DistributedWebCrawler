@@ -12,6 +12,7 @@ import (
 	"time"
 	"sort"
 	"golang.org/x/net/html"
+	// "sync"
 )
 
 // server RPC
@@ -23,7 +24,9 @@ type MWorker int
 const workerPort string = "3800"
 var (
 	serverAddress string
-	urls []string
+	savedDomains map[string]struct{}
+	webGraph map[string][]string // maps url:[next urls]
+	// mu sync.Mutex
 )
 
 type RegisterWorkerReq struct {
@@ -45,7 +48,11 @@ func main() {
 		return
 	}
 
-	serverAddr := args[0]
+	serverAddress = args[0]
+	webGraph = make(map[string][]string)
+	savedDomains = make(map[string]struct{})
+
+	log.Println("Connected to server", serverAddress)
 
 	go func() {
 		workerServer := rpc.NewServer()
@@ -64,12 +71,12 @@ func main() {
 		}
 	}()
 
-	conn, err := net.Dial("tcp", serverAddr)
+	conn, err := net.Dial("tcp", serverAddress)
 	if err != nil {
 		log.Fatal("tcp server dial error ", err)
 	}
 	client := rpc.NewClient(conn)
-	registerAddr := getAddress(serverAddr) + ":" + workerPort
+	registerAddr := getAddress(serverAddress) + ":" + workerPort
 	req := RegisterWorkerReq{WorkerIP: registerAddr,}
 	res := RegisterWorkerReq{}
 	err = client.Call("MWorker.RegisterWorker", &req, &res)
@@ -85,10 +92,18 @@ func getDomainName(uri string) string {
 	u, _ := url.Parse(uri)
 	return u.Host
 }
-func getAbsolutePath(uri string) string {
+// remove relative path from a uri starting with "http"
+func resolveReference(uri string) string {
 	u, _ := url.Parse(uri)
-	base, _ := url.Parse(getDomainName("http://example.com/directory/"))
+	base, _ := url.Parse(getDomainName(uri))
 	return base.ResolveReference(u).String()
+}
+func filterAddress(link, domain string) string {
+	resolved := resolveReference(link)
+	if strings.HasPrefix(link, "/") {
+		return domain + resolved
+	} 
+	return resolved
 }
 
 func handleClientConnection(conn net.Conn, serverAddr string) {
@@ -115,7 +130,7 @@ func (t *MWorker) MeasureLatency(req *MeasureLatencyReq, res *MeasureLatencyRes)
 		defer response.Body.Close()
 		if err != nil {
 			skips++
-			log.Println("Http Get Failed ", err)
+			log.Println("HTTP Get Failed ", err)
 			continue
 		}
 		end := time.Now()
@@ -125,7 +140,7 @@ func (t *MWorker) MeasureLatency(req *MeasureLatencyReq, res *MeasureLatencyRes)
 		} else {
 			skips++
 		}
-		fmt.Println("HTTP Request", req.URL, elapsed)
+		log.Printf("Measuring HTTP Get (%s) = %v\n", req.URL, elapsed)
 	}
 
 	// sort latencies
@@ -152,23 +167,57 @@ type CrawlWebsiteReq struct {
 	Depth int
 }
 type CrawlWebsiteRes struct {
-
+	Depth int
+	Links []string
+}
+func contains(arr []string, val string) bool {
+	for _, a := range arr {
+		if val == a {
+			return true
+		}
+	}
+	return false
 }
 func (t *MWorker) CrawlWebsite(req *CrawlWebsiteReq, res *CrawlWebsiteRes) error {
+	log.Printf("Start crawling %s (depth= %d)\n", req.URL, req.Depth)
 	domain := getDomainName(req.URL)
-	fmtURL := getAbsolutePath(req.URL)
+	// store domain name if hasn't already
+	if _, in := savedDomains[domain]; !in {
+		savedDomains[domain] = struct{}{}
+	}
+	if req.Depth == 0 {
+		return nil
+	}
+	// get absolute path
+	fmtRequestURL := filterAddress(req.URL, domain)
+	links := getLinks(fmtRequestURL)
+	log.Println("Done Crawling.")
+	// could try to distribute this work
+	for _, link := range links {
+		if !contains(webGraph[fmtRequestURL], link) {
+			webGraph[fmtRequestURL] = append(webGraph[fmtRequestURL], link)
+		}
+	}
+	// doing this means each depth will return to server
+	res.Depth--
+	res.Links = links
 	
-	
+	// for node, edges := range webGraph {
+	// 	log.Printf("\nNode:\t%s\nEdges:\t%s\n", node, edges)
+	// }
+
 
 	return nil
 }
-// crawl once (depth = 1)
-// need to check if the link starts with https or not
-// some may be relative url instead of absolute
-func crawl(uri string) (links []string) {
-	fmt.Println("Crawling", uri)
+
+// extract links from a web page
+// returns a string of formatted link
+// remove relative path of if a link doesn't start with http, add to it a domain name
+func getLinks(uri string) (links []string) {
 	resp, _ := http.Get(uri)
 	defer resp.Body.Close()
+	
+	domain := getDomainName(uri)
 	z := html.NewTokenizer(resp.Body)
 	uniqueLinks := make(map[string]bool)
 
@@ -185,7 +234,7 @@ func crawl(uri string) (links []string) {
 						if attr.Key == "href" && ! uniqueLinks[attr.Val] {
 							// check if the path is relative
 							// if not append
-							links = append(links, attr.Val)
+							links = append(links, filterAddress(attr.Val, domain))
 							uniqueLinks[attr.Val] = true
 						}
 					}
