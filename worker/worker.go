@@ -20,10 +20,9 @@ type WServer int
 // worker RPC
 type MWorker int
 
-
-const workerPort string = "3800"
 var (
 	serverAddress string
+	workerPort string
 	savedDomains map[string]struct{}
 	webGraph map[string][]string // maps url:[next urls]
 	mu sync.Mutex
@@ -49,6 +48,7 @@ func main() {
 	}
 
 	serverAddress = args[0]
+	workerPort = args[1]
 	webGraph = make(map[string][]string)
 	savedDomains = make(map[string]struct{})
 
@@ -70,7 +70,6 @@ func main() {
 			go workerServer.ServeConn(conn)
 		}
 	}()
-
 	conn, err := net.Dial("tcp", serverAddress)
 	if err != nil {
 		log.Fatal("tcp server dial error ", err)

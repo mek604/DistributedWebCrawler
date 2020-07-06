@@ -65,8 +65,9 @@ func main() {
 	        if err != nil {
 	            log.Fatal("tcp server accept error ", err)
 	        }
-	        log.Println("Worker Connected:", workerAddr)
-			handleWorkerConnection(conn)
+	        log.Println("Worker Connected:", conn.RemoteAddr().String())
+			go handleWorkerConnection(conn)
+			// added "go"
 	    }
 	}()
 
@@ -93,7 +94,6 @@ func main() {
 func handleClientConnection(conn net.Conn) {
 	rpc.ServeConn(conn)
 	conn.Close()
-
 }
 func handleWorkerConnection(conn net.Conn) {
 	rpc.ServeConn(conn)
@@ -196,9 +196,9 @@ func findWorker(reqURL string) string {
 		var wg sync.WaitGroup
 		wg.Add(len(workers))
 		// request workers to measure latency to a website
-		log.Printf("\tMeasuring latency of (%s)", reqURL)
+		log.Printf("-> Worker RPC: Measure latency of (%s)", reqURL)
 		for _, worker := range workers {
-			go func() {
+			go func(worker string) {
 				conn, err := net.Dial("tcp", worker)
 				defer conn.Close()
 				if err != nil {
@@ -210,7 +210,7 @@ func findWorker(reqURL string) string {
 				// log.Println(latReq.URL, latRes.Min, latRes.Median, latRes.Max)
 				stats[worker] = latRes
 				wg.Done()
-			}()
+			}(worker)
 		}
 		wg.Wait()
 		worker = selectBestLatency(stats)
