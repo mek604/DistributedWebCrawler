@@ -52,7 +52,7 @@ func main() {
 	webGraph = make(map[string][]string)
 	savedDomains = make(map[string]struct{})
 
-	log.Println("Connected to server", serverAddress)
+	log.Println("Connecting to server", serverAddress)
 
 	go func() {
 		workerServer := rpc.NewServer()
