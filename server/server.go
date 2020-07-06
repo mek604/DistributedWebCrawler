@@ -119,10 +119,9 @@ func (t *MWorker) RegisterWorker(req *RegisterWorkerReq, res *RegisterWorkerRes)
 	mu.Lock()
 	defer mu.Unlock()
 	workers = append(workers, req.WorkerIP)
-	log.Println("Register", req.WorkerIP, " to worker pool")
+	log.Println("Register", req.WorkerIP, "to worker pool")
 	return nil
 }
-//*************************************************************
 //*************************************************************
 type DomainsReq struct {
 	WorkerIP string // IP of worker
@@ -226,10 +225,8 @@ func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
 	log.Printf("<- Clien RPC: Crawl (%s)\n", req.URL)
 	worker := findWorker(req.URL)
 	res.WorkerIP = worker
-
-	if req.Depth > 0 {
-		sendCrawlTask(worker, req.URL, req.Depth)	
-	}
+	sendCrawlTask(worker, req.URL, req.Depth)	
+	log.Println("Crawl done")
 
 	return nil
 }
@@ -240,28 +237,26 @@ type CrawlWebsiteReq struct {
 	Depth int
 }
 type CrawlWebsiteRes struct {
-	Depth int
 	Links []string
 }
-// does not seem to loop back
-// maybe the crawl loop returns first?
 func sendCrawlTask(worker, uri string, depth int) {
+	if depth < 1 {
+		return
+	}
 	log.Printf("-> Worker RPC: ask %s to crawl %s\n", worker, uri)
 	conn, _ := net.Dial("tcp", worker)
 	client := rpc.NewClient(conn)
-	defer conn.Close()
-
+	// defer conn.Close()
 	req := CrawlWebsiteReq{
 		URL: uri,
 		Depth: depth,
 	}
 	res := CrawlWebsiteRes{}
-	// need to make this better
 	_ = client.Call("MWorker.CrawlWebsite", req, &res)
 	depth--
-	var wg sync.WaitGroup
-	// subsequent crawls
+
 	if depth > 0 {
+		var wg sync.WaitGroup
 		for _, link := range res.Links {
 			wg.Add(1)
 			go func(link string, d int) {
@@ -270,11 +265,12 @@ func sendCrawlTask(worker, uri string, depth int) {
 					return
 				}
 				worker := findWorker(link)
-				log.Println(link, worker, depth)
+				log.Printf("\n\n%s %s %d\n\n",link, worker, depth)
 				sendCrawlTask(worker, link, d)
 			}(link, depth)
 		}
 		depth--
+		// don't crawl next depth until all links are returned
 		wg.Wait()
 	}
 }

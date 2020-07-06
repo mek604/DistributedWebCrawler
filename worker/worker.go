@@ -154,7 +154,7 @@ func (t *MWorker) MeasureLatency(req *MeasureLatencyReq, res *MeasureLatencyRes)
 		res.Min = latencies[0]
 		n := len(latencies) - skips
 		if n % 2 == 0 {
-			res.Median = latencies[(n-1)/2] + latencies[(n-1/2) + 1] / 2
+			res.Median = latencies[(n-1)/2] + latencies[((n-1)/2) + 1] / 2
 		} else {
 			res.Median = latencies[(n - 1) / 2]
 		}
