@@ -1,7 +1,7 @@
 # Distributed Web Crawler
 ## CSC462, Summer 2020
 
-
+### Please note: test.go is not part of the program, it's just a test file
 
 ### Usage:
 
