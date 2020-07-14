@@ -21,22 +21,15 @@ var (
 )
 
 //************************* RPC *************************
+// client RPC
 type MServer int
+// worker RPC
 type MWorker int
 
 func getPort (address string) (port string) {
 	return	strings.Split(address, ":")[1]
 }
 
-
-
-//*************************************************************
-
-/*
-
-
-
-*/
 
 func main() {
 
@@ -57,14 +50,14 @@ func main() {
 	go func() {
 		rpc.Register(new(MWorker))
 		listener, err := net.Listen("tcp", workerAddr)
-	    if err != nil {
-	        log.Fatal("tcp server listener error", err)
-	    }
-	    for {
-	        conn, err := listener.Accept()
-	        if err != nil {
-	            log.Fatal("tcp server accept error ", err)
-	        }
+		if err != nil {
+			log.Fatal("tcp server listener error", err)
+		}
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				log.Fatal("tcp server accept error ", err)
+			}
 	        log.Println("Worker Connected:", conn.RemoteAddr().String())
 			go handleWorkerConnection(conn)
 			// added "go"
@@ -84,7 +77,7 @@ func main() {
 	            log.Fatal("tcp server accept error ", err)
 	        }
 	        log.Println("Client Connected:", clientAddr)
-			handleClientConnection(conn)
+			go handleClientConnection(conn)
 	    }
 	}()
 
@@ -114,12 +107,17 @@ func (t *MServer) GetWorkers(req *GetWorkersReq, res *GetWorkersRes) error {
 type RegisterWorkerReq struct {
 	WorkerIP string
 }
-type RegisterWorkerRes struct {}
+type RegisterWorkerRes struct {
+	WorkerList []string
+	Index int
+}
 func (t *MWorker) RegisterWorker(req *RegisterWorkerReq, res *RegisterWorkerRes) error {
 	mu.Lock()
 	defer mu.Unlock()
 	workers = append(workers, req.WorkerIP)
-	log.Println("Register", req.WorkerIP, "to worker pool")
+	res.WorkerList = workers
+	res.Index = len(workers) - 1
+	log.Printf("Register #%d %s to worker pool\n", res.Index, req.WorkerIP)
 	return nil
 }
 //*************************************************************
@@ -225,7 +223,9 @@ func (m *MServer) Crawl(req *CrawlReq, res *CrawlRes) error {
 	log.Printf("<- Clien RPC: Crawl (%s)\n", req.URL)
 	worker := findWorker(req.URL)
 	res.WorkerIP = worker
-	sendCrawlTask(worker, req.URL, req.Depth)	
+	sendCrawlTask(worker, req.URL, req.Depth)
+	// wait for all workers to finish crawling before return to client
+
 	log.Println("Crawl done")
 
 	return nil
@@ -239,7 +239,50 @@ type CrawlWebsiteReq struct {
 type CrawlWebsiteRes struct {
 	Links []string
 }
+
+// so much network traffic
+// master -> worker a list of URLs
+// grab all links from the urls responsible by worker
+// each worker grab a list of links and return back to workers
+// server add to a queue to crawl
+// master cares about job send to a worker, try the other way
+
+// urls from worker put into same data structure
+// push all urls to that channels, response -> take all urls shovel to that channel
+// another routine loop over that channel and aggregate it
+// grab 5 things and do work
+
 func sendCrawlTask(worker, uri string, depth int) {
+	// conn, _ := net.Dial("tcp", worker)
+	// client := rpc.NewClient(conn)
+	// req := CrawlWebsiteReq{
+	// 	URL: uri,
+	// 	Depth: depth,
+	// }
+	// res := CrawlWebsiteRes{}
+	// _ = client.Call("MWorker.CrawlWebsite", req, &res)
+	// depth--
+
+	// if depth > 0 {
+	// 	var wg sync.WaitGroup
+	// 	for _, link := range res.Links {
+	// 		wg.Add(1)
+	// 		go func(link string, d int) {
+	// 			defer wg.Done()
+	// 			if link == "" {
+	// 				return
+	// 			}
+	// 			worker := findWorker(link)
+	// 			// remove
+	// 			log.Printf("\n\n%s %s %d\n\n",link, worker, depth)
+	// 			sendCrawlTask(worker, link, d)
+	// 		}(link, depth)
+	// 	}
+	// 	depth--
+	// 	// don't crawl next depth until all links are returned
+	// 	wg.Wait()
+	// }
+	// ----------------------------------------------------------------
 	if depth < 1 {
 		return
 	}
@@ -265,7 +308,8 @@ func sendCrawlTask(worker, uri string, depth int) {
 					return
 				}
 				worker := findWorker(link)
-				log.Printf("\n\n%s %s %d\n\n",link, worker, depth)
+				// remove
+				// log.Printf("\n\n%s %s %d\n\n", link, worker, depth)
 				sendCrawlTask(worker, link, d)
 			}(link, depth)
 		}
@@ -275,3 +319,34 @@ func sendCrawlTask(worker, uri string, depth int) {
 	}
 }
 //*************************************************************
+// type OverlapReq struct {
+// 	URL1 string
+// 	URL2 string
+// }
+// type OverlapRes struct {
+// 	NumPages int
+// }
+// type ComputeOverlapReq struct {
+// 	URL1 string
+// 	URL2 string
+// }
+// type ComputeOverlapRes struct {
+// 	NumPages int
+// }
+// func (m *MServer) Overlap(req OverlapReq, res *OverlapRes) error {
+// 	uri1_domain := getDomainName(req.URL1)
+// 	uri2_domain := getDomainName(req.URL1)
+// 	worker1 := findWorker(req.URL1)
+// 	worker2 := findWorker(req.URL2)
+// 	log.Printf("Select W1: %s for %s\n", worker1, req.URL1)
+// 	log.Printf("Select W2: %s for %s\n", worker2, req.URL2)
+
+// 	overlapReq := ComputeOverlapReq{
+// 		URL1:      uri1,
+// 		URL2:      uri2,
+// 		WorkerIP1: workerIP1,
+// 		WorkerIP2: workerIP2,
+// 	}
+
+// 	return nil
+// }
