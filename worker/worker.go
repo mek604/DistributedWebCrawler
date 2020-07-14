@@ -15,9 +15,6 @@ import (
 	"sync"
 )
 
-// server RPC
-type WServer int
-// worker RPC
 type MWorker int
 
 var (
@@ -25,13 +22,18 @@ var (
 	workerPort string
 	savedDomains map[string]struct{}
 	webGraph map[string][]string // maps url:[next urls]
+	workers []string
+	me int
 	mu sync.Mutex
 )
 
 type RegisterWorkerReq struct {
 	WorkerIP string
 }
-type RegisterWorkerRes struct {}
+type RegisterWorkerRes struct {
+	WorkerList []string
+	Index int
+}
 
 
 func getAddress (address string) (string) {
@@ -70,22 +72,96 @@ func main() {
 			go workerServer.ServeConn(conn)
 		}
 	}()
-	conn, err := net.Dial("tcp", serverAddress)
+
+	addr, err := net.ResolveTCPAddr("tcp", serverAddress)
+	if err != nil {
+		log.Fatal("tcp server resolve error ", err)
+	}
+	conn, err := net.DialTCP("tcp", nil, addr)
+	// conn, err := net.Dial("tcp", serverAddress)
 	if err != nil {
 		log.Fatal("tcp server dial error ", err)
 	}
 	client := rpc.NewClient(conn)
 	registerAddr := getAddress(serverAddress) + ":" + workerPort
 	req := RegisterWorkerReq{WorkerIP: registerAddr,}
-	res := RegisterWorkerReq{}
-	err = client.Call("MWorker.RegisterWorker", &req, &res)
-	if err != nil {
-		log.Fatal("rcp call error ", err)
+	res := RegisterWorkerRes{}
+	if err = client.Call("MWorker.RegisterWorker", &req, &res); err != nil {
+		log.Fatal("Failed to register with server ", err)
 	}
+	workers = res.WorkerList
+	me = res.Index
+	log.Println("Registered with server. Workers list:", workers)
+
+	// update other servers with a new list of workers
+	if len(workers) > 1 {
+		updateWorkersRPC()
+	}
+
 	conn.Close()
 
 	select{}
 }
+
+//---------------------------------------------------------------------
+type UpdateWorkerListReq struct {
+	WorkerList []string
+	Index int
+}
+type UpdateWorkerListRes struct {}
+
+func (t *MWorker) UpdateWorkerList(req UpdateWorkerListReq, res *UpdateWorkerListRes) error {
+	// a list of workers from another worker that has the most up-to-date with the server's list of workers
+	// assuming me Position does not change?
+	workers = req.WorkerList
+	me = req.Index
+	log.Println("Updated worker list", workers)
+	return nil
+}
+
+func updateWorkersRPC() {
+	go func() {
+		for i, waddr := range workers {
+			if i != me {
+				addr, err := net.ResolveTCPAddr("tcp", waddr)
+				if err != nil {
+					log.Fatal("tcp server resolve error ", err)
+				}
+				conn, err := net.DialTCP("tcp", nil, addr)
+				if err != nil {
+					log.Fatal("tcp server dial error ", err)
+				}
+				client := rpc.NewClient(conn)
+				req := UpdateWorkerListReq{ 
+					WorkerList: workers,
+					Index: i,
+				}
+				res := UpdateWorkerListRes{}
+				if err = client.Call("MWorker.UpdateWorkerList", &req, &res); err != nil {
+					log.Fatal("Failed to update other workers ", err)
+				}
+			}
+		}
+	}()
+
+	// go func() {
+	// 	workerServer := rpc.NewServer()
+	// 	workerServer.Register(new(WWorker))
+
+	// 	listener, err := net.Listen("tcp", ":" + workerPort)
+	// 	if err != nil {
+	// 		log.Fatal("tcp server listener error ", err)
+	// 	}
+	// 	for {
+	// 		conn, err := listener.Accept()
+	// 		if err != nil {
+	// 			log.Fatal("tcp server accept error ", err)
+	// 		}
+	// 		go workerServer.ServeConn(conn)
+	// 	}
+	// }()
+}
+//---------------------------------------------------------------------
 
 func getDomainName(uri string) string {
 	u, _ := url.Parse(uri)
@@ -97,7 +173,14 @@ func resolveReference(uri string) string {
 	base, _ := url.Parse(getDomainName(uri))
 	return base.ResolveReference(u).String()
 }
+
+// returns the domain if the link is invalid
 func filterAddress(link, domain string) string {
+	_, err := url.ParseRequestURI(link)
+	if err != nil {
+		return "http://" + domain
+	}
+
 	resolved := resolveReference(link)
 	if strings.HasPrefix(link, "/") {
 		resolved = "http://" + domain + resolved
@@ -209,6 +292,7 @@ func (t *MWorker) CrawlWebsite(req *CrawlWebsiteReq, res *CrawlWebsiteRes) error
 	// doing this means each crawl depth will have to send back a response to server
 	// TO DO: continue to crawl right away if the worker owns the extracted link
 	res.Links = links 
+
 	// for node, edges := range webGraph {
 	// 	log.Printf("\nNode:\t%s\nEdges:\t%s\n", node, edges)
 	// }
@@ -249,4 +333,28 @@ func getLinks(uri string) (links []string) {
 	return
 }
 
+//--------------------------------------------l----------
+type OverlapReq struct {
+}
+type OverlapRes struct {
+}
+
+func (m *MWorker) MeasureOverlap(req OverlapReq, res *OverlapRes) error {
+	/* 
+
+ 	// in WorkerA
+ 	DomainName of B
+ 	for all urls in webGraph of A,
+ 		x = convert the value to domain name
+ 		if x == DomainName of B:
+ 			count++
+
+ 	// in WorkerB
+ 	repeat above
+
+ 	// eventually sum it out and returns to client
+
+	*/ 
+	return nil
+}
 //*************************************************************
